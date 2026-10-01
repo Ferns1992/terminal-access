@@ -376,7 +376,7 @@
   function connectSocket(id, conn) {
     const tab = state.tabs.get(id);
     if (!tab) return;
-    ensureSocket();
+    if (!ensureSocket()) return;
     state.socket.emit('connect-ssh', { connectionId: conn.id, terminalId: id });
   }
 
@@ -451,6 +451,10 @@
   // ── Socket ──────────────────────────────────────────────────────────────
   function ensureSocket() {
     if (state.socket) return;
+    if (typeof io !== 'function') {
+      toast('❌ socket.io client failed to load', 'err');
+      return null;
+    }
     const socket = io({ withCredentials: true, transports: ['websocket', 'polling'] });
     state.socket = socket;
 
