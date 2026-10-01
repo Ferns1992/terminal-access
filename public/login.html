@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Terminal Access</title>
+<link rel="icon" href="/img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<main class="login-shell">
+  <div class="login-card">
+    <img src="/img/icon.svg" alt="" class="login-logo">
+    <h1 class="login-title">Terminal Access</h1>
+    <p class="login-sub">🔐 Secure access to your servers</p>
+
+    <div class="error-msg" id="err" hidden></div>
+
+    <form id="loginForm" autocomplete="on">
+      <div class="field">
+        <label for="u">👤 Username</label>
+        <input id="u" name="username" type="text" autocomplete="username"
+               spellcheck="false" autocapitalize="off" required>
+      </div>
+      <div class="field">
+        <label for="p">🔑 Password</label>
+        <input id="p" name="password" type="password"
+               autocomplete="current-password" required>
+      </div>
+      <button class="btn" type="submit" id="submit">Sign in</button>
+    </form>
+
+    <p class="login-foot">⚡ Powered by Terminal Access</p>
+  </div>
+</main>
+
+<script>
+const form = document.getElementById('loginForm');
+const err = document.getElementById('err');
+const btn = document.getElementById('submit');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.hidden = true;
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('u').value,
+        password: document.getElementById('p').value
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      btn.textContent = '✓';
+      location.href = '/';
+    } else {
+      err.textContent = data.error || 'Sign in failed';
+      err.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Sign in';
+    }
+  } catch {
+    err.textContent = 'Network error — please try again';
+    err.hidden = false;
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+  }
+});
+</script>
+</body>
+</html>
