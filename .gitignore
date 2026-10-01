@@ -1,0 +1,18 @@
+node_modules/
+.env
+.env.local
+.env.production
+*.log
+server.log
+.DS_Store
+backups/
+__pycache__/
+*.swp
+*.swo
+Thumbs.db
+connections.json
+
+# Local credential backups pulled off the VPS - never commit
+connections.json.orig
+*.orig
+deploy/credentials/
