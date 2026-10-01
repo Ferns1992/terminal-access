@@ -1,0 +1,17 @@
+[Unit]
+Description=Terminal Access
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/terminal-hub
+# Secrets live in a mode-600 file rather than in this unit or in argv,
+# so they never show up in `ps` or `systemctl show`.
+EnvironmentFile=/opt/terminal-hub/.env
+ExecStart=/usr/bin/node /opt/terminal-hub/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
