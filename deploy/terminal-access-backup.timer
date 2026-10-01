@@ -1,0 +1,15 @@
+[Unit]
+Description=Nightly Terminal Access backup to Cloudflare R2
+
+[Timer]
+# 04:23 local. Deliberately not :00 — every other backup timer on these
+# boxes already fires near the hour, and they all wake at the same instant.
+OnCalendar=*-*-* 04:23:00
+# A missed run (reboot, outage) should still be covered.
+Persistent=true
+# Spread load a little so the box is not competing with other cron work.
+RandomizedDelaySec=300
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

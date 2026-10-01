@@ -360,11 +360,35 @@
       const fit = new FitCtor();
       term.loadAddon(fit);
       if (LinkCtor) term.loadAddon(new LinkCtor());
+
+      // Hide the empty-state placeholder BEFORE opening the terminal.
+      // `.empty` is flex:1, so while it is visible it collapses
+      // `.term-pane` to zero height. Opening there makes fit() compute
+      // 0 rows x 0 cols and the terminal renders blank. Data still
+      // arrives over the socket, which is why stats worked while the
+      // terminal looked dead.
+      const placeholder = $('empty');
+      if (placeholder) placeholder.hidden = true;
+
       term.open(host);
 
-      const tab = { conn, term, fit, host, status: 'connecting' };
+      const tab = { conn, term, fit, host, status: 'connecting', ro: null };
       state.tabs.set(id, tab);
       state.order.push(id);
+
+      // Refit once the browser has actually laid the pane out. Fitting
+      // synchronously right after open() still measures the old geometry.
+      const refit = () => { try { fit.fit(); } catch (e) {} };
+      requestAnimationFrame(() => requestAnimationFrame(refit));
+
+      // Keep this terminal sized to its pane. Without this, a background
+      // tab keeps stale dimensions, and switching to it shows wrapped or
+      // clipped text until a window resize happens to fix it.
+      if (typeof ResizeObserver === 'function') {
+        tab.ro = new ResizeObserver(() => { if (state.active === id) refit(); });
+        tab.ro.observe(host);
+      }
+
       renderTabs();
       setActive(id);
       connectSocket(id, conn);
@@ -386,7 +410,11 @@
     const tab = state.tabs.get(id);
     $('empty').hidden = !!tab;
     if (tab) {
-      try { tab.fit.fit(); tab.term.focus(); } catch (e) {}
+      // Fit after the pane has been unhidden and laid out, otherwise the
+      // measurement comes back zero-sized.
+      requestAnimationFrame(() => {
+        try { tab.fit.fit(); tab.term.focus(); } catch (e) {}
+      });
     }
     renderTabs();
     renderConnections();
@@ -399,6 +427,7 @@
     if (!tab) return;
     if (state.socket) state.socket.emit('terminal-close', { terminalId: id });
     try { tab.term.dispose(); } catch (e) {}
+    if (tab.ro) { try { tab.ro.disconnect(); } catch (e) {} }
     tab.host.remove();
     state.tabs.delete(id);
     state.order = state.order.filter((x) => x !== id);

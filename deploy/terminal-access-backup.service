@@ -1,0 +1,29 @@
+[Unit]
+Description=Terminal Access backup to Cloudflare R2
+Documentation=https://github.com/Ferns1992/terminal-access
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/terminal-access-backup.sh
+# The job only needs to read the app dir and talk to R2.
+User=root
+Group=root
+# Tighter than the default: the script reads connections.json and .env.
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
