@@ -345,9 +345,21 @@
         theme: xtermTheme(),
         allowProposedApi: true
       });
-      const fit = new FitAddon.FitAddon();
+      // These addon files export a MODULE OBJECT, not the class itself:
+      //   e.FitAddon = t()  where  t() -> { FitAddon: class {...} }
+      // so the constructor is one level deeper. Using `new FitAddon()`
+      // against xterm-addon-fit 0.8 / web-links 0.9 matches the original
+      // working app. Getting this wrong throws here, before any socket
+      // event is emitted, and the connect button appears to do nothing.
+      const FitCtor = (typeof FitAddon === 'function') ? FitAddon : (window.FitAddon && window.FitAddon.FitAddon);
+      const LinkCtor = (typeof WebLinksAddon === 'function') ? WebLinksAddon : (window.WebLinksAddon && window.WebLinksAddon.WebLinksAddon);
+      if (!FitCtor) {
+        toast('❌ FitAddon failed to load', 'err');
+        return;
+      }
+      const fit = new FitCtor();
       term.loadAddon(fit);
-      term.loadAddon(new WebLinksAddon.WebLinksAddon());
+      if (LinkCtor) term.loadAddon(new LinkCtor());
       term.open(host);
 
       const tab = { conn, term, fit, host, status: 'connecting' };
@@ -498,6 +510,22 @@
 
     socket.on('connect', () => setStateDot(true, 'Connected'));
     socket.on('connect_error', () => setStateDot(false, 'Offline'));
+
+    // A throw inside a socket callback is otherwise invisible: the UI just
+    // stops responding. Surface it instead.
+    socket.on('error', (err) => {
+      toast(`❌ Socket error: ${(err && err.message) || err}`, 'err');
+    });
+
+    // Global backstop so any uncaught error becomes visible feedback rather
+    // than a silently dead button.
+    window.addEventListener('error', (ev) => {
+      if (ev && ev.message) toast(`⚠️ ${ev.message}`, 'err');
+    });
+    window.addEventListener('unhandledrejection', (ev) => {
+      const r = ev && ev.reason;
+      toast(`⚠️ ${(r && r.message) || r || 'Unexpected error'}`, 'err');
+    });
   }
 
   // ── Metrics ─────────────────────────────────────────────────────────────
