@@ -376,6 +376,21 @@
       state.tabs.set(id, tab);
       state.order.push(id);
 
+      // Send keystrokes to the remote PTY. Without this the terminal is
+      // display-only: xterm renders a local echo of what you type and
+      // nothing ever reaches the server, so no command ever runs.
+      term.onData((input) => {
+        const sock = state.socket;
+        if (sock) sock.emit('terminal-input', { terminalId: id, data: input });
+      });
+
+      // Keep the remote PTY sized to the visible pane so full-screen programs
+      // (vim, top, htop) reflow instead of drawing at the wrong width.
+      term.onResize(({ cols, rows }) => {
+        const sock = state.socket;
+        if (sock) sock.emit('terminal-resize', { terminalId: id, cols, rows });
+      });
+
       // Refit once the browser has actually laid the pane out. Fitting
       // synchronously right after open() still measures the old geometry.
       const refit = () => { try { fit.fit(); } catch (e) {} };
@@ -494,6 +509,19 @@
     socket.on('terminal-ready', ({ terminalId }) => {
       const t = state.tabs.get(terminalId);
       if (t) { t.status = 'open'; renderTabs(); updateStatus(); }
+      // The remote PTY was opened at the server's default size, and any
+      // resize before this point was dropped because the stream did not
+      // exist yet. Send the real geometry now so full-screen programs wrap
+      // correctly from the first frame.
+      if (t && state.socket) {
+        try {
+          state.socket.emit('terminal-resize', {
+            terminalId,
+            cols: t.term.cols || 80,
+            rows: t.term.rows || 24,
+          });
+        } catch (e) {}
+      }
     });
 
     socket.on('terminal-data', ({ terminalId, data }) => {
