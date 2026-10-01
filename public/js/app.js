@@ -479,7 +479,11 @@
 
   // ── Socket ──────────────────────────────────────────────────────────────
   function ensureSocket() {
-    if (state.socket) return;
+    // Must ALWAYS return the socket. Returning undefined on the cached path
+    // silently swallowed every connect-ssh: setActive() -> startMonitor()
+    // creates the socket first, so the later call from connectSocket() took
+    // the cached branch, returned undefined, and bailed before emitting.
+    if (state.socket) return state.socket;
     if (typeof io !== 'function') {
       toast('❌ socket.io client failed to load', 'err');
       return null;
@@ -521,7 +525,13 @@
       if (state.monitorFor && d.monitorId === state.monitorFor) paintMetrics(d);
     });
 
-    socket.on('monitor-error', () => {
+    socket.on('monitor-error', ({ monitorId, error } = {}) => {
+      // Tearing down the previous server's SSH client emits a monitor-error
+      // for THAT monitorId. Hiding the bar unconditionally wiped the metrics
+      // of the server just selected, which is what made metrics vanish when
+      // switching between two connected servers.
+      if (monitorId && state.monitorFor && monitorId !== state.monitorFor) return;
+      if (error) console.warn('[monitor]', monitorId, error);
       const el = $('metrics');
       if (el) el.hidden = true;
     });
@@ -559,17 +569,28 @@
       const r = ev && ev.reason;
       toast(`⚠️ ${(r && r.message) || r || 'Unexpected error'}`, 'err');
     });
+
+    return state.socket;
   }
 
   // ── Metrics ─────────────────────────────────────────────────────────────
   function startMonitor(conn) {
+    // Await the new monitor's first payload so metrics for a newly selected
+    // server appear immediately instead of after the poll interval. Keeps the
+    // previous server's metrics on screen until real data replaces them, rather
+    // than blanking them while waiting.
     if (state.socket && state.monitorFor) state.socket.emit('stop-monitor', { monitorId: state.monitorFor });
     state.monitorFor = null;
-    $('metrics').hidden = !conn;
-    if (!conn) return;
-    ensureSocket();
+    if (!conn) {
+      $('metrics').hidden = true;
+      return;
+    }
+    const socket = ensureSocket();
+    if (!socket) return;
+    $('metrics').hidden = false;
     state.monitorFor = 'm_' + conn.id;
-    state.socket.emit('start-monitor', { connectionId: conn.id, monitorId: state.monitorFor });
+    state.metricsFor = state.monitorFor;
+    socket.emit('start-monitor', { connectionId: conn.id, monitorId: state.monitorFor });
   }
 
   function paintMetrics(d) {
