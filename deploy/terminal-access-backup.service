@@ -10,8 +10,10 @@ ExecStart=/usr/local/bin/terminal-access-backup.sh
 # The job only needs to read the app dir and talk to R2.
 User=root
 Group=root
-# Tighter than the default: the script reads connections.json and .env.
-ProtectHome=yes
+# ProtectHome=yes hides /root, which is where the rclone config AND the
+# backup encryption key live, so it made every scheduled run fail. The
+# hardening below is kept; only ProtectHome is dropped.
+# ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectKernelTunables=yes

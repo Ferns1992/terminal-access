@@ -76,6 +76,31 @@ with no SSH client installed.
 | **Data durability** | `writeFileSync` could truncate credentials on a crash | Write to `.tmp` then `rename` (atomic) |
 | **Dead code** | `app.js`/`a.js`, `terminal.js`/`t.js`, `style.css`/`s.css` were byte-identical duplicates | Removed |
 | **Shutdown** | Open SSH clients on SIGTERM | Graceful teardown with a hard-exit fallback |
+| **Login (dead UI)** | CSP `script-src 'self'` blocks inline scripts, and the login logic was inline — the form rendered but its handler never ran, so sign-in did nothing | Moved to `/js/login.js`; reports `429` lockout distinctly from bad credentials |
+| **Connect (dead button)** | The page never loaded `/socket.io/socket.io.js`, so `io()` was undefined and every click threw before touching the network. The HTTP **Test** button still reported reachable, because it never uses socket.io | Script tag restored; `ensureSocket()` reports a missing client instead of failing silently |
+| **Terminal sizing** | `.empty` is `flex: 1` and still visible during `term.open()`, collapsing `.term-pane` to zero height — `fit()` computed `0 × 0` and the terminal rendered blank while data still arrived | Placeholder hidden before opening; refit in `requestAnimationFrame`; `ResizeObserver` per tab |
+| **Connect (silent no-op)** | `ensureSocket()` returned `undefined` on its cached path; `connectSocket()` read that as failure and returned. `setActive() → startMonitor()` creates the socket first, so **every** subsequent connect skipped `connect-ssh` | `ensureSocket()` always returns the socket |
+| **Metrics on switch** | `monitor-error` hid the bar unconditionally. Switching servers tears down the old SSH client, emitting an error for the *old* `monitorId` — which wiped the newly selected server's metrics | Only the active `monitorId` may hide the bar |
+| **No input** | No `term.onData` handler existed, so keystrokes were echoed by xterm locally and never sent — no command could run | `onData` → `terminal-input`; `onResize` → `terminal-resize`; geometry re-sent on `terminal-ready` |
+
+> 🧪 **Why so many of these shipped:** the HTTP **Test** endpoint and the socket terminal are
+> independent paths. "Test says reachable" only proves SSH credentials work, never that the
+> browser reaches the server. Every bug above passed that check. They were found by driving the
+> real page in Chrome and inspecting emitted and received socket events — not by reading code,
+> where several of them looked correct.
+
+> 🧩 **Lesson for anyone editing this file:** the rewrite dropped parts of the socket data
+> path while leaving the UI intact, so nothing threw at load and nothing looked obviously
+> wrong. When adding a feature here, diff the socket event list against the working version
+> first, and verify with `test/e2e-terminal-probe.js` and a real browser.
+
+```bash
+# Drive the real page: login, open a terminal, type a command, check metrics
+cd test && npm i puppeteer-core
+node e2e-browser-check.js   # requires the admin password in /tmp/browsertest/.pw
+```
+
+See `test/e2e-terminal-probe.js` for a Node-only probe of the same paths.
 
 ---
 
@@ -246,16 +271,44 @@ Using `EnvironmentFile` keeps secrets out of the unit file and out of `ps` outpu
 
 ## 🗄️ Backups
 
-`deploy/terminal-hub-backup.sh` snapshots `connections.json` and the app source, verifies the
-JSON parses, keeps 14 local copies, then mirrors to Cloudflare R2 with `rclone copy`
-(copy, never sync — sync could delete remote objects).
+`deploy/terminal-access-backup.sh` runs nightly from `terminal-access-backup.timer`
+(04:23 + up to 5 min jitter). It snapshots `connections.json`, `.env`, and the app source,
+encrypts the archive, then mirrors it to the **`terminal-access-backups`** R2 bucket.
 
-Run it nightly from a systemd timer.
+| | |
+|---|---|
+| 🔐 Encryption | `openssl aes-256-cbc -pbkdf2 -iter 200000`, key from `BACKUP_KEY_FILE` |
+| 🗄️ Local retention | 14 snapshots in `/var/backups/terminal-access` (mode `700`, files `600`) |
+| ☁️ Remote retention | 90 days |
+| 📤 Upload | `rclone copy` — **never** `sync`, which could delete remote objects |
+| 🔑 Key | 32 random bytes at `/root/.config/terminal-access/backup.key`, mode `600`, never uploaded |
 
-> 🛡️ **Always open the backup to verify it.** A first version of this script once uploaded
-> three empty snapshots because a SQLite-style `connect()` silently created a new file instead
-> of opening the existing one. Verification printed success against the *original* file, so the
-> log looked healthy while the backup was worthless.
+Encryption matters here specifically because `connections.json` holds live root SSH
+passwords for every server. An unencrypted copy in a bucket turns a bucket read into a
+full fleet compromise.
+
+> 🛡️ **Always open the backup to verify it — and open the *backup*, not the source.**
+> Verifying the original and calling that a success proves nothing about the copy you would
+> restore from. This script therefore decrypts the archive it just produced, checks it
+> untars, and aborts if the connection count inside the archive differs from the live file.
+>
+> ⚠️ **Do not set `ProtectHome=yes` on the backup unit.** Both `rclone.conf` and the backup
+> key live under `/root`, and `ProtectHome` makes them invisible — every scheduled run then
+> fails with `FATAL: backup key ... missing` while manual runs from a root shell succeed.
+> That asymmetry is easy to misread as a working backup.
+
+Restore:
+
+```bash
+rclone cat R2:terminal-access-backups/terminal-access-<stamp>.tar.gz.enc \
+  | openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
+      -pass "pass:$(sha256sum /root/.config/terminal-access/backup.key | cut -d' ' -f1)" \
+  | tar -xz payload/connections.json
+```
+
+> 🚨 **The encryption key is the real backup.** Lose `/root/.config/terminal-access/backup.key`
+> and every snapshot becomes permanently unreadable. It is deliberately not uploaded to R2, so
+> keep an independent copy off this server.
 
 ---
 

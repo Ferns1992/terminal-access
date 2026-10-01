@@ -37,11 +37,21 @@ if [ -f "$LIVE/.env" ]; then
   echo "    preserved existing .env"
 else
   SESS=$(openssl rand -hex 32)
+  # Never hardcode the admin password here. Require it from the environment
+  # so this file can never leak a credential into version control.
+  if [ -z "${AUTH_PASS:-}" ]; then
+    echo "    ERROR: set AUTH_PASS in the environment (e.g. AUTH_PASS=... ./deploy.sh)"
+    echo "           Refusing to generate a .env with an empty or guessed password."
+    exit 1
+  fi
   cat > "$STAGE/.env" <<EOF
 PORT=3000
-BIND_ADDR=127.0.0.1
+# Must be 0.0.0.0: cloudflared reaches the origin over the host IP, so a
+# loopback bind makes the public hostname return 502 while the app is
+# healthy on 127.0.0.1.
+BIND_ADDR=0.0.0.0
 AUTH_USER=admin
-AUTH_PASS=Cloudflare@2@24ferns
+AUTH_PASS=$AUTH_PASS
 SESSION_SECRET=$SESS
 TRUST_PROXY=true
 SHELL_TYPE=xterm-256color
